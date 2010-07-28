@@ -13,6 +13,9 @@ import time
 import socket
 import urllib
 import re
+import sqlite3
+import shutil
+import cPickle
 from threading import Event
 
 # find an elementtree implementation
@@ -131,7 +134,7 @@ class LocalList(dict):
 		else:
 			ins_sharepath = ['/usr/share/tp', 
 							 '/usr/share/games/tp', 
-							 '/usr/local/share/tp', 
+							 '/usr/local/share/tp',
 							 '/opt/tp', 
 							 os.path.join(version.installpath, 'tp/client/singleplayer'),
 				]
@@ -765,49 +768,136 @@ class SinglePlayerGame:
 		else:
 			return None
 
+        def save(self, dst):
+                """\
+                Saves the persistence database to the specified location
+                and adds the singleplayer table with details of the original game
+
+                @param dst: The destination of the save file, complete with directory and filename
+                @type dst: string
+                """
+                shutil.copyfile("/var/tmp/tpserver.db", dst)
+
+                conn = sqlite3.connect(dst)
+                cur = conn.cursor()
+
+                cur.execute("CREATE TABLE singleplayer ( compType, compName, compValue, version);")
+
+                # clear singleplayer table to avoid doubling info
+                cur.execute("DELETE FROM singleplayer;")
+                conn.commit()
+
+                # add ruleset to singleplayer table
+                cur.execute("INSERT INTO singleplayer VALUES ('ruleset', 'rname', '" + self.rname + "', '0');")
+
+                # add server to singleplayer table
+                cur.execute("INSERT INTO singleplayer VALUES ('server', 'sname', '" + self.sname + "', '0');")
+
+                # add ruleset parameters to singleplayer table
+                for param in self.rparams:
+                        cur.execute("INSERT INTO singleplayer VALUES ('rparam', '" + param + "', '" + self.rparams[param] + "', '0');")
+
+                # add server parameters to singleplayer table
+                for param in self.sparams:
+                        cur.execute("INSERT INTO singleplayer VALUES ('sparam', '" + param + "', '" + self.sparams[param] + "', '0');")
+
+                # add aiclients to singleplayer table
+                #for aiclient in self.opponents:
+                #        cur.execute("INSERT INTO singleplayer VALUES ('aiclient', 'name', '" + aiclient['name'] + "', '0');")
+                #        cur.execute("INSERT INTO singleplayer VALUES ('aiclient', 'user', '" + aiclient['user'] + "', '0');")
+                #        for param in aiclient['parameters']:
+                #                cur.execute("INSERT INTO singleplayer Values ('aiparam', '" + param + "', '" + aiclient['parameters'][param] + "', '0');")
+                for aiclient in self.opponents:
+                        cur.execute("INSERT INTO singleplayer VALUES ('opponent', 'aiclient', '" + cPickle.dumps(aiclient, cPickle.HIGHEST_PROTOCOL) + "', '0');")
+
+                # commit changes to database and close connection
+                conn.commit()
+                conn.close()
+
+        def load(self, src):
+                """\
+                Loads the persistence database from the specified location
+
+                @param src: The source save file, complete with directory and filename
+                @type src: string
+                """
+                shutil.copyfile(src, "/var/tmp/tpserver.db")
+
+                conn = sqlite3.connect("/var/tmp/tpserver.db")
+                cur = conn.cursor()
+
+                cur.execute("SELECT * FROM singleplayer;")
+
+                for row in cur:
+                        if (row[0 ] == 'ruleset'):
+                                self.rname = row[2]
+                        elif (row[0] == 'server'):
+                                self.sname = row[2]
+                        elif (row[0] == 'rparam'):
+                                self.rparams[row[1]] = row[2]
+                        elif (row[0] == 'sparam'):
+                                self.sparams[row[1]] = row[2]
+                        elif (row[0] == 'opponent'):
+                                self.opponents.append(cPickle.loads(str(row[2])))
+
 
 if __name__ == "__main__":
 	game = SinglePlayerGame()
-	print 'SELECT RULESET'
-	while game.rname not in game.rulesets:
-		game.rname = raw_input('Choose a ruleset from ' + str(game.rulesets) + ': ')
-	slist = game.list_servers_with_ruleset()
-	if len(slist) > 1:
-		print 'SELECT SERVER'
-		print 'There are multiple servers implementing the', game.rname, 'ruleset.'
-		while game.sname not in slist:
-			game.sname = raw_input('Choose a server from ' + str(slist) + ': ')
-	else:
-		game.sname = slist[0]
-	paramlist = game.list_rparams()
-	if len(paramlist):
-		print 'RULESET OPTIONS'
-		for param in paramlist.keys():
-			game.rparams[param] = raw_input(paramlist[param]['longname'] + ' (' + paramlist[param]['type'] + '): ')
-	paramlist = game.list_sparams()
-	if len(paramlist):
-		print 'SERVER OPTIONS'
-		for param in paramlist.keys():
-			game.sparams[param] = raw_input(paramlist[param]['longname'] + ' (' + paramlist[param]['type'] + '): ')
-	ailist = game.list_aiclients_with_ruleset()
-	if len(ailist):
-		print 'ADD OPPONENTS'
-	while len(ailist) > 0:
-		aiuser = raw_input('Enter an opponent name (leave blank to stop adding opponents): ')
-		if aiuser:
-			ainame = ''
-			while ainame not in ailist:
-				ainame = raw_input('Please select an AI client from ' + str(ailist) + ': ')
-			aiparams = {}
-			paramlist = game.list_aiparams(ainame)
-			for param in paramlist.keys():
-				aiparams[param] = raw_input(paramlist[param]['longname'] + ' (' + paramlist[param]['type'] + '): ')
-			game.add_opponent(ainame, aiuser, aiparams)
-		else:
-			break
-	port = game.start()
-	if port:
-		print "Game started on port %d." % port
-		raw_input("Press any key to stop...")
-	game.stop()
+        print 'SELECT PERSISTENCE'
+        load = raw_input('Choose to load a game (leave blank to start a new game): ')
+        if load:
+                print 'LOADING GAME'
+                savefile = raw_input('Type the absolute location of the savefile: ')
+
+                game.load(savefile)
+
+                port = game.start()
+                if port:
+                        print "Game started on port %d." % port
+                        raw_input("Press any key to stop...")
+                game.stop()
+        else:
+                print 'SELECT RULESET'
+                while game.rname not in game.rulesets:
+                        game.rname = raw_input('Choose a ruleset from ' + str(game.rulesets) + ': ')
+                slist = game.list_servers_with_ruleset()
+                if len(slist) > 1:
+                        print 'SELECT SERVER'
+                        print 'There are multiple servers implementing the', game.rname, 'ruleset.'
+                        while game.sname not in slist:
+                                game.sname = raw_input('Choose a server from ' + str(slist) + ': ')
+                else:
+                        game.sname = slist[0]
+                paramlist = game.list_rparams()
+                if len(paramlist):
+                        print 'RULESET OPTIONS'
+                        for param in paramlist.keys():
+                                game.rparams[param] = raw_input(paramlist[param]['longname'] + ' (' + paramlist[param]['type'] + '): ')
+                paramlist = game.list_sparams()
+                if len(paramlist):
+                        print 'SERVER OPTIONS'
+                        for param in paramlist.keys():
+                                game.sparams[param] = raw_input(paramlist[param]['longname'] + ' (' + paramlist[param]['type'] + '): ')
+                ailist = game.list_aiclients_with_ruleset()
+                if len(ailist):
+                        print 'ADD OPPONENTS'
+                while len(ailist) > 0:
+                        aiuser = raw_input('Enter an opponent name (leave blank to stop adding opponents): ')
+                        if aiuser:
+                                ainame = ''
+                                while ainame not in ailist:
+                                        ainame = raw_input('Please select an AI client from ' + str(ailist) + ': ')
+                                aiparams = {}
+                                paramlist = game.list_aiparams(ainame)
+                                for param in paramlist.keys():
+                                        aiparams[param] = raw_input(paramlist[param]['longname'] + ' (' + paramlist[param]['type'] + '): ')
+                                game.add_opponent(ainame, aiuser, aiparams)
+                        else:
+                                break
+                port = game.start()
+                if port:
+                        print "Game started on port %d." % port
+                        raw_input("Press any key to stop...")
+                game.save("/var/tmp/savefile.tpsav")
+                game.stop()
 
