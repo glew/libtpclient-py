@@ -782,9 +782,11 @@ class SinglePlayerGame:
                 cur = conn.cursor()
 
                 cur.execute("CREATE TABLE singleplayer ( compType, compName, compValue, version);")
+                cur.execute("CREATE TABLE opponent ( aiclient, ainame, aiparams, version, picklefile);")
 
                 # clear singleplayer table to avoid doubling info
                 cur.execute("DELETE FROM singleplayer;")
+                cur.execute("DELETE FROM opponent;")
                 conn.commit()
 
                 # add ruleset to singleplayer table
@@ -808,7 +810,7 @@ class SinglePlayerGame:
                 #        for param in aiclient['parameters']:
                 #                cur.execute("INSERT INTO singleplayer Values ('aiparam', '" + param + "', '" + aiclient['parameters'][param] + "', '0');")
                 for aiclient in self.opponents:
-                        cur.execute("INSERT INTO singleplayer VALUES ('opponent', 'aiclient', '" + cPickle.dumps(aiclient, cPickle.HIGHEST_PROTOCOL) + "', '0');")
+                        cur.execute("INSERT INTO opponent VALUES ('" + aiclient['name'] + "', '" + aiclient['user'] + "', '" + cPickle.dumps(aiclient['parameters']) + "', '0','');")
 
                 # commit changes to database and close connection
                 conn.commit()
@@ -837,8 +839,11 @@ class SinglePlayerGame:
                                 self.rparams[row[1]] = row[2]
                         elif (row[0] == 'sparam'):
                                 self.sparams[row[1]] = row[2]
-                        elif (row[0] == 'opponent'):
-                                self.opponents.append(cPickle.loads(str(row[2])))
+
+                cur.execute("SELECT * FROM opponent;")
+
+                for row in cur:
+                        self.add_opponent(row[0], row[1], cPickle.loads(row[2]))
 
 
 if __name__ == "__main__":
