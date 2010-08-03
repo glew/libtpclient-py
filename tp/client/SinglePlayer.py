@@ -843,7 +843,7 @@ class SinglePlayerGame:
                 cur.execute("SELECT * FROM opponent;")
 
                 for row in cur:
-                        self.add_opponent(row[0], row[1], cPickle.loads(row[2]))
+                        self.add_opponent(row[0], row[1], cPickle.loads(str(row[2])))
 
 
 if __name__ == "__main__":
