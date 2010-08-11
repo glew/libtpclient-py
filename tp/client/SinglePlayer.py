@@ -924,7 +924,8 @@ if __name__ == "__main__":
 
                 if game.sparams['persistence'] == 'tpsqlite':
                         savelocation = raw_input('Specify the absolute directory and filename of the savefile: ')
-                        game.save(savelocation)
+                        if savelocation:
+                                game.save(savelocation)
                         
                 game.stop()
 
