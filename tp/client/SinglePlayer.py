@@ -356,6 +356,7 @@ class SinglePlayerGame:
 
 		# initialize internals
 		self.active = False
+                self.newgame = True
 		self.ready = Event()
 		self.sname = ''
 		self.rname = ''
@@ -614,6 +615,9 @@ class SinglePlayerGame:
                                                 servercmd += ' --sqlite_db '
                                         else:
                                                 servercmd += ' --sqlite_db /var/tmp/tpserver.db'
+                                                if self.newgame and os.path.exists("/var/tmp/tpserver.db"):
+                                                        print "Removing old persistence database"
+                                                        os.remove("/var/tmp/tpserver.db")
 
 			# start server - add forced ruleset parameters to command line
 			for forced in ruleset['forced']:
@@ -836,6 +840,8 @@ class SinglePlayerGame:
                 @param src: The source save file, complete with directory and filename
                 @type src: string
                 """
+                self.newgame = False
+
                 # Copy savefile to persistence database location
                 if sys.platform == 'win32':
                         shutil.copyfile(src, win32Location)
