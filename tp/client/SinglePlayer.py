@@ -608,6 +608,13 @@ class SinglePlayerGame:
 					continue
 				servercmd += ' ' + server['parameter'][pname]['commandstring'] % value
 
+                                # start server - add sqlite database if tpsqlite persistence
+                                if value == 'tpsqlite':
+                                        if sys.platform == 'win32':
+                                                servercmd += ' --sqlite_db '
+                                        else:
+                                                servercmd += ' --sqlite_db /var/tmp/tpserver.db'
+
 			# start server - add forced ruleset parameters to command line
 			for forced in ruleset['forced']:
 				servercmd += ' ' + forced
@@ -618,7 +625,7 @@ class SinglePlayerGame:
 				if self.rparams.has_key(pname):
 					value = self.rparams[pname]
 				value = self._format_value(value, ruleset['parameter'][pname]['type'])
-				if value is None:
+                                if value is None:
 					continue
 				elif value == '':
 					servercmd += ' ' + ruleset['parameter'][pname]['commandstring']
@@ -630,7 +637,7 @@ class SinglePlayerGame:
 			onready = None
 			if server['started'] != '':
 				onready = (re.compile(server['started']), self._onready)
-			try:
+                        try:
 				self.sproc = Launcher(servercmd, servercwd, onexit = self._onexit, onready = onready)
 				self.sproc.launch()
 			except OSError, e:
@@ -761,7 +768,7 @@ class SinglePlayerGame:
 			return None
 		elif ptype == 'I':
 			return int(value)
-		elif ptype == 'S' or type == 'F':
+		elif ptype == 'S' or ptype == 'F':
 			return str(value)
 		elif ptype == 'B' and str(value) == 'True':
 			return ''
@@ -776,9 +783,15 @@ class SinglePlayerGame:
                 @param dst: The destination of the save file, complete with directory and filename
                 @type dst: string
                 """
-                shutil.copyfile("/var/tmp/tpserver.db", dst)
 
-                conn = sqlite3.connect(dst)
+                # Copy persistence database to savefile location
+                if sys.platform == 'win32':
+                        shutil.copyfile(win32Location)
+                        conn = sqlite3.connect(dst)
+                else:
+                        shutil.copyfile("/var/tmp/tpserver.db", dst)
+                        conn = sqlite3.connect(dst)
+
                 cur = conn.cursor()
 
                 cur.execute("CREATE TABLE singleplayer ( compType, compName, compValue, version);")
@@ -823,9 +836,14 @@ class SinglePlayerGame:
                 @param src: The source save file, complete with directory and filename
                 @type src: string
                 """
-                shutil.copyfile(src, "/var/tmp/tpserver.db")
+                # Copy savefile to persistence database location
+                if sys.platform == 'win32':
+                        shutil.copyfile(src, win32Location)
+                        conn = sqlite3.connect(win32Location)
+                else:
+                        shutil.copyfile(src, "/var/tmp/tpserver.db")
+                        conn = sqlite3.connect("/var/tmp/tpserver.db")
 
-                conn = sqlite3.connect("/var/tmp/tpserver.db")
                 cur = conn.cursor()
 
                 cur.execute("SELECT * FROM singleplayer;")
@@ -903,6 +921,10 @@ if __name__ == "__main__":
                 if port:
                         print "Game started on port %d." % port
                         raw_input("Press any key to stop...")
-                game.save("/var/tmp/savefile.tpsav")
+
+                if game.sparams['persistence'] == 'tpsqlite':
+                        savelocation = raw_input('Specify the absolute directory and filename of the savefile: ')
+                        game.save(savelocation)
+                        
                 game.stop()
 
