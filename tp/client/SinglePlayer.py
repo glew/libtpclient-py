@@ -806,11 +806,11 @@ class SinglePlayerGame:
                 cur.execute("DELETE FROM opponent;")
                 conn.commit()
 
-                # add ruleset to singleplayer table
-                cur.execute("INSERT INTO singleplayer VALUES ('ruleset', 'rname', '" + self.rname + "', '" + self.locallist['server'][self.sname]['ruleset'][self.rname]['version'] + "');")
-
                 # add server to singleplayer table
                 cur.execute("INSERT INTO singleplayer VALUES ('server', 'sname', '" + self.sname + "', '" + self.locallist['server'][self.sname]['version'] + "');")
+
+                # add ruleset to singleplayer table
+                cur.execute("INSERT INTO singleplayer VALUES ('ruleset', 'rname', '" + self.rname + "', '" + self.locallist['server'][self.sname]['ruleset'][self.rname]['version'] + "');")
 
                 # add ruleset parameters to singleplayer table
                 for param in self.rparams:
@@ -855,10 +855,24 @@ class SinglePlayerGame:
                 cur.execute("SELECT * FROM singleplayer;")
 
                 for row in cur:
-                        if (row[0 ] == 'ruleset'):
-                                self.rname = row[2]
-                        elif (row[0] == 'server'):
-                                self.sname = row[2]
+                        if (row[0 ] == 'server'):
+                                for server in self.locallist['server']:
+                                        if row[2] == server:
+                                                if row[3] == self.locallist['server'][server]['version']:
+                                                        self.sname = row[2]
+                                                        break
+                                                continue
+                                if not self.sname:
+                                        print "No compatible server"
+                        elif (row[0] == 'ruleset'):
+                                for ruleset in self.locallist['server'][self.sname]['ruleset']:
+                                        if row[2] == ruleset:
+                                                if row[3] == self.locallist['server'][self.sname]['ruleset'][ruleset]['version']:
+                                                        self.rname = row[2]
+                                                        break
+                                                continue
+                                if not self.rname:
+                                        print "No compatible ruleset"
                         elif (row[0] == 'rparam'):
                                 self.rparams[row[1]] = row[2]
                         elif (row[0] == 'sparam'):
@@ -867,7 +881,21 @@ class SinglePlayerGame:
                 cur.execute("SELECT * FROM opponent;")
 
                 for row in cur:
-                        self.add_opponent(row[0], row[1], cPickle.loads(str(row[2])))
+                        ainame = ''
+                        aiuser = ''
+                        aiparams = {}
+                        for aiclient in self.locallist['aiclient']:
+                                if row[0] == aiclient:
+                                        if row[3] == self.locallist['aiclient'][aiclient]['version']:
+                                                ainame = row[0]
+                                                aiuser = row[1]
+                                                aiparams = cPickle.loads(str(row[2]))
+                                                break
+                                        continue
+                        if ainame:
+                                self.add_opponent(ainame, aiuser, aiparams)
+                        else:
+                                print "Opponent %s is not compatible" % row[0]
 
 
 if __name__ == "__main__":
