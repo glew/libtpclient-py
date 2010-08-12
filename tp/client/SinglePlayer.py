@@ -807,10 +807,10 @@ class SinglePlayerGame:
                 conn.commit()
 
                 # add ruleset to singleplayer table
-                cur.execute("INSERT INTO singleplayer VALUES ('ruleset', 'rname', '" + self.rname + "', '0');")
+                cur.execute("INSERT INTO singleplayer VALUES ('ruleset', 'rname', '" + self.rname + "', '" + self.locallist['server'][self.sname]['ruleset'][self.rname]['version'] + "');")
 
                 # add server to singleplayer table
-                cur.execute("INSERT INTO singleplayer VALUES ('server', 'sname', '" + self.sname + "', '0');")
+                cur.execute("INSERT INTO singleplayer VALUES ('server', 'sname', '" + self.sname + "', '" + self.locallist['server'][self.sname]['version'] + "');")
 
                 # add ruleset parameters to singleplayer table
                 for param in self.rparams:
@@ -827,7 +827,7 @@ class SinglePlayerGame:
                 #        for param in aiclient['parameters']:
                 #                cur.execute("INSERT INTO singleplayer Values ('aiparam', '" + param + "', '" + aiclient['parameters'][param] + "', '0');")
                 for aiclient in self.opponents:
-                        cur.execute("INSERT INTO opponent VALUES ('" + aiclient['name'] + "', '" + aiclient['user'] + "', '" + cPickle.dumps(aiclient['parameters']) + "', '0','');")
+                        cur.execute("INSERT INTO opponent VALUES ('" + aiclient['name'] + "', '" + aiclient['user'] + "', '" + cPickle.dumps(aiclient['parameters']) + "', '" + game.locallist['aiclient'][aiclient['name']]['version'] + "','');")
 
                 # commit changes to database and close connection
                 conn.commit()
