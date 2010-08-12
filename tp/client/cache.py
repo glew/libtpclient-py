@@ -11,7 +11,7 @@ import traceback
 if sys.platform == "darwin":
 	import pickle as pickle
 else:
-	import cPickle as pickle
+	import pickle as pickle
 from datetime import datetime
 
 def df(time):
@@ -29,7 +29,9 @@ except NameError:
 
 # Other library imports
 from tp.netlib import Connection, failed, constants, objects
-from tp.netlib.objects import Header, Description, OrderDescs, DynamicBaseOrder
+from tp.netlib.objects import Header, Description
+from tp.netlib.objects import OrderDescs, DynamicBaseOrder
+from tp.netlib.objects import ObjectDescs, DynamicBaseObject
 
 # Local imports
 # FIXME: Should I think about merging the ChangeList and ChangeDict?
@@ -48,7 +50,7 @@ class Cache(object):
 	"""
 	__metaclass__ = thread_checker
 
-	version = 6
+	version = 7
 
 	class CacheEvent(Event):
 		"""\
@@ -138,7 +140,7 @@ class Cache(object):
 				CacheEvent.__init__(self, what, *args, **kw)
 
 	# Read Only things can only be updated via the network
-	readonly = ("features", "objects", "orders_probe", "boards", "resources", "components", "properties", "players", "resources")
+	readonly = ("features", "objects", "orderqueues", "orders_probe", "boards", "resources", "components", "properties", "players", "resources")
 	# These can be updated via either side
 	readwrite = ("orders", "messages", "categories", "designs")
 	# How we can update the Cache
@@ -147,7 +149,7 @@ class Cache(object):
 	compound = ("orders", "messages")
 
 	@staticmethod
-	def key(server, username):
+	def key(server, game, username):
 		key = server
 
 		p = ['tp://', 'tps://', 'http://', 'https://']
@@ -160,12 +162,14 @@ class Cache(object):
 			key = 'tp://' + key
 		if key.find('@') == -1:
 			p, s = key.split('//', 1)
-			key = "%s//%s@%s" % (p, username, s)
+			key = "%s//%s@%s(%s)" % (p, username, s, game.ctime)
 		return key
 
 	@staticmethod
 	def configkey(key):
-		key = base64.encodestring(key)[:-2]
+		if isinstance(key, unicode):
+			key = key.encode('utf-8')
+		key = base64.encodestring(key)[:-2].replace('/', '')
 		return key
 
 	@staticmethod
@@ -217,6 +221,7 @@ class Cache(object):
 		# The object stuff
 		self.objects		= ChangeDict()
 		self.orders			= ChangeDict()
+		self.orderqueues    = ChangeDict()
 		self.orders_probe	= ChangeDict()
 
 		# The message boards
@@ -290,7 +295,7 @@ class Cache(object):
 
 		if not evt.what in Cache.compound:
 			if evt.action == "create" or evt.action == "change":
-				getattr(self, evt.what)[evt.id] = (-1, evt.change)
+				getattr(self, evt.what)[evt.id] = (evt.change.modify_time, evt.change)
 			elif evt.action == "remove":
 				del getattr(self, evt.what)[evt.id]
 
@@ -326,14 +331,26 @@ class Cache(object):
 		if v != self.version:
 			raise IOError("The cache is not of this version! (It's version %s)" % (v,))
 
-		orderdescs, = struct.unpack('!I', f.read(4))
+		# Now load the object cache
+		objectdescs, = struct.unpack('!I', f.read(4))
+		for i in xrange(0, objectdescs):
+			d = f.read(Header.size)
+
+			p = Header.fromstr(d)
+
+			d = f.read(p._length)
+			p.__process__(d)
+			
+			assert isinstance(p, Description)
+			p.register()
 
 		# Now load the order cache
+		orderdescs, = struct.unpack('!I', f.read(4))
 		for i in xrange(0, orderdescs):
 			d = f.read(Header.size)
 			p = Header.fromstr(d)
 
-			d = f.read(p.length)
+			d = f.read(p._length)
 			p.__process__(d)
 
 			assert isinstance(p, Description)
@@ -350,6 +367,9 @@ class Cache(object):
 					pending.__class__ = OrderDescs()[pending.subtype]
 				node._what.__class__ = OrderDescs()[node._what.subtype]
 
+		for node in d['objects'].values():
+			node.__class__ = ObjectDescs()[node.subtype]
+
 		self.__dict__.update(d)
 
 	def save(self):
@@ -363,9 +383,14 @@ class Cache(object):
 		f = open(file, 'wb')
 		f.write(struct.pack('!I', self.version))
 
+		# Save each dynamic object description
+		descriptions = ObjectDescs()
+		f.write(struct.pack('!I', len(descriptions)))
+		for objectdesc in descriptions.values():
+			f.write(str(objectdesc.packet))
+	
 		# Save each dynamic order description
 		descriptions = OrderDescs()
-
 		f.write(struct.pack('!I', len(descriptions)))
 		for orderdesc in descriptions.values():
 			f.write(str(orderdesc.packet))
@@ -374,6 +399,11 @@ class Cache(object):
 		del p['_thread']
 
 		# Stop referencing the dynamic orders
+		for node in p['objects'].values():
+			subtype = node.subtype
+			node.__class__ = DynamicBaseObject
+			node.subtype = subtype
+
 		for clist in p['orders'].values():
 			for node in clist:
 				for pending in node._pending:
@@ -385,7 +415,7 @@ class Cache(object):
 				node._what.__class__ = DynamicBaseOrder
 				node._what.subtype = subtype
 
-		#pickle.dump(p, f)
+		pickle.dump(p, f)
 
 		# FIXME: The above copy should not be mutating!
 		for clist in p['orders'].values():
@@ -393,6 +423,9 @@ class Cache(object):
 				for pending in node._pending:
 					pending.__class__ = OrderDescs()[pending.subtype]
 				node._what.__class__ = OrderDescs()[node._what.subtype]
+
+		for node in p['objects'].values():
+			node.__class__ = ObjectDescs()[node.subtype]
 			
 		f.close()
 
@@ -467,15 +500,16 @@ class Cache(object):
 		# Get all the objects
 		#############################################################################
 		#############################################################################
-		toget = self.__getObjects(connection,   "objects", callback)
-		if toget > 0:
-			#self.__getSubObjects(connection, toget, "objects", "orders", "order_number", callback)
-			self.__getOrders(connection, toget, callback)
+		self.__getObjects(connection, "objects", callback)
+
+		toget = self.__getObjects(connection, "orderqueues", callback)
+		if len(toget) > 0:
+			self.__getSubObjects(connection, toget, "orderqueues",  "orders", "numorders", callback)
 		else:
 			c("orders", "finished", message=_("Don't have any orders to get.."))
 
-		toget = self.__getObjects(connection,   "boards", callback)
-		if toget > 0:
+		toget = self.__getObjects(connection, "boards", callback)
+		if len(toget) > 0:
 			self.__getSubObjects(connection, toget, "boards",  "messages", "number", callback)
 		else:
 			c("messages", "finished", message=_("Don't have any messages to get.."))
@@ -484,34 +518,10 @@ class Cache(object):
 		self.__getObjects(connection, "designs",    callback)
 		self.__getObjects(connection, "components", callback)
 		self.__getObjects(connection, "properties", callback)
-#		self.__getObjects(connection, "players",    callback)
+		self.__getObjects(connection, "players",    callback)
 		self.__getObjects(connection, "resources",  callback)
 
-		c("players", "start", message=_("Getting player objects..."))
-
-		playerids = self.players.keys()
-		if len(playerids) > 0:
-			playerids.sort()
-			i = playerids[-1]+1
-		else:
-			i = 0
-
-		while True:
-			player = connection.get_players(i)
-
-			if failed(player):
-				break
-			else:
-				self.players[i] = player[0]
-
-			c("players", "downloaded", amount=1, \
-				message=_("Got player %(player)s (ID: %(id)i)...") % {'player': player[0].name, 'id': player[0].id})
-
-			i += 1
-
-		c("players", "finished", message=_("Received all player objects..."))
-		
-#		self.players[0] = connection.get_players(0)[0]
+		self.players[0] = connection.get_players(0)[0]
 
 	def __getObjects(self, connection, plural_name, callback):
 		"""\
@@ -539,10 +549,11 @@ class Cache(object):
 		c(pn, "progess", message=_("Working out the number of %s to get..") % pn)
 		toget = []
 		ids = []
+
 		for id, time in getattr(connection, "get_%s_ids" % sn)(iter=True):
 			ids.append(id)
 			if not cache().has_key(id):
-				c(pn, "info", message=_("%(plural_name)s: Getting %(id)s as not cache().has_key(id)") % {'plural_name': pn, 'id': id})
+				c(pn, "info", message=_("%(plural_name)s: Getting new object with %(id)s.") % {'plural_name': pn, 'id': id})
 				toget.append(id)
 			elif time > cache().times[id]:
 				c(pn, "info", message=_("%(plural_name)s: Getting %(id)s (%(name)s) as %(time)s > %(cached_time)s") % {'plural_name': pn, 'id': id, 'name': cache(id).name, 'time': time, 'cached_time': cache().times[id]})
@@ -556,41 +567,38 @@ class Cache(object):
 				c(pn, "downloaded", amount=1, \
 					message=_("Got %(singular_name)s %(name)s (ID: %(id)i) (last modified at %(time)s)...") % {'singular_name': sn, 'name': p.name, 'id': p.id, 'time': p.modify_time})
 
-		if len(toget) < 1:
-			c(pn, "finished", message=_("No %s to get, skipping...") % pn)
-			return 0
+		if len(toget) > 0:
+			# Download the XXX
+			c(pn, "todownload", \
+				message=_("Have %(amount)i %(plural_name)s to get...") % {'amount': len(toget), 'plural_name': pn}, todownload=len(toget))
+			frames = getattr(connection, "get_%s" % pn)(ids=toget, callback=OnPacket)
 
-		# Download the XXX
-		c(pn, "todownload", \
-			message=_("Have %(ammount)i %(plural_name)s to get...") % {'ammount': len(toget), 'plural_name': pn}, todownload=len(toget))
-		frames = getattr(connection, "get_%s" % pn)(ids=toget, callback=OnPacket)
+			if failed(frames):
+				raise IOError("Strange error occured, unable to request %s." % pn)
 
-		if failed(frames):
-			raise IOError("Strange error occured, unable to request %s." % pn)
-
-		# Match the results to the associated ids
-		for id, frame in zip(toget, frames):
-			if not failed(frame):
-				if cache().has_key(id):
-					c(pn, "info", \
-						message=_("%(plural_name)s: Updating %(id)s (%(name)s - %(frame_name)s) with modtime %(time)s") % {'plural_name': pn, 'id': id, 'name': cache(id).name, 'frame_name': frame.name, 'time': frame.modify_time})
+			# Match the results to the associated ids
+			for id, frame in zip(toget, frames):
+				if not failed(frame):
+					if cache().has_key(id):
+						c(pn, "info", \
+							message=_("%(plural_name)s: Updating %(id)s (%(name)s - %(frame_name)s) with modtime %(time)s") % {'plural_name': pn, 'id': id, 'name': cache(id).name, 'frame_name': frame.name, 'time': frame.modify_time})
+					else:
+						c(pn, "info", \
+							message=_("%(plural_name)s: Updating %(id)s (%(frame_name)s - New!) with modtime %(time)s") % {'plural_name': pn, 'id': id, 'frame_name': frame.name, 'time': frame.modify_time})
+					cache()[id] = (frame.modify_time, frame)
 				else:
-					c(pn, "info", \
-						message=_("%(plural_name)s: Updating %(id)s (%(frame_name)s - New!) with modtime %(time)s") % {'plural_name': pn, 'id': id, 'frame_name': frame.name, 'time': frame.modify_time})
-				cache()[id] = (frame.modify_time, frame)
-			else:
-				if cache().has_key(id):
-					c(pn, "failure", \
-						message=_("Failed to get the %(singular_name)s which was previously called %(name)s.") % {'singular_name': sn, 'name': cache(id).name})
-				else:
-					c(pn, "failure", \
-						message=_("Failed to get the %(singular_name)s with ID %(id)s.") % {'singular_name': sn, 'id': id})
+					if cache().has_key(id):
+						c(pn, "failure", \
+							message=_("Failed to get the %(singular_name)s which was previously called %(name)s. (%(error)s)") % {'singular_name': sn, 'name': cache(id).name, 'error': frame[-1]})
+					else:
+						c(pn, "failure", \
+							message=_("Failed to get the %(singular_name)s with ID %(id)s. (%(error)s)") % {'singular_name': sn, 'id': id, 'error': frame[-1]})
 
-				# Don't get any sub-objects for this 
-				toget.remove(id)
+					# Don't get any sub-objects for this 
+					toget.remove(id)
 
-				# This object does not really exist on the server
-				ids.remove(id)
+					# This object does not really exist on the server
+					ids.remove(id)
 
 		c(pn, "progress", message=_("Cleaning up %s which have disappeared...") % pn)
 
@@ -620,81 +628,6 @@ class Cache(object):
 		c(pn, "finished", message=_("Received all %s...") % pn)
 
 		return toget
-
-	#self.__getSubObjects(connection, toget, "objects", "orders", "order_number", callback)
-	def __getOrders(self, connection, toget, callback=None):
-		callback("orders", "start", message=_("Getting orders..."))
-		callback("orders", "todownload", message=_("Have to get orders for %i objects...") % len(toget), todownload=len(toget))
-
-		# Set the blocking so we can pipeline the requests
-		connection.setblocking(True)
-		gettingqueues = []
-		emptyqueues = []
-		for objectid in toget:
-			object = self.objects[objectid]
-		
-			from tp.netlib.objects.parameters import ObjectParamOrderQueue
-			for group in object.properties:
-				for property in group.structures:
-					if not isinstance(property, ObjectParamOrderQueue):
-						continue
-
-					value = getattr(getattr(object, group.name), property.name)
-					#Skip if zero (no access)
-					if value.queueid == 0:
-						continue
-
-					# Skip the queues we are already getting
-					if value.queueid in gettingqueues or value.queueid in emptyqueues:
-						continue
-
-					if value.numorders > 0:
-						callback("orders", "progress", \
-							message=_("Sending a request for all orders in queue %i on %s...") % (value.queueid, unicode(object.name)))
-						getattr(connection, "get_orders")(value.queueid, range(0, value.numorders))
-						gettingqueues.append((objectid, value.queueid))
-					else:
-						callback("orders", "progress", \
-							message=_("Skipping requesting orders on %s as there are none!") % unicode(object.name))
-						emptyqueues.append((objectid, value.queueid))
-
-		print "Getting data for:"
-		print gettingqueues
-		print "The following where empty:"
-		print emptyqueues
-		
-		for objectid, id in emptyqueues:
-			self.orders[id] = (self.objects[objectid].modify_time, ChangeList())
-
-		# Wait for the response to the order requests
-		while len(gettingqueues) > 0:
-			result = None
-			while result is None:
-				result = connection.poll()
-
-			objectid, queueid = gettingqueues.pop(0)
-			if failed(result):
-				callback("orders", "failure", \
-					message=_("Failed to get orders (id: %s) (%s)...") % (queueid, result[1]))
-				continue
-			else:
-				callback("orders", "downloaded", amount=1, \
-					message=_("Got %i orders (id: %s)...") % (len(result), queueid))
-
-			subs = ChangeList()
-			for sub in result:
-				subs.append(ChangeNode(sub))
-
-			self.orders[queueid] = (self.objects[objectid].modify_time, subs)
-
-		callback("orders", "progress", message=_("Cleaning up any stray orders..."))
-		for id in self.orders.keys():
-			if not self.objects.has_key(id):
-				callback("orders", "progress", message=_("Found stray orders for %s...") % id)
-				del self.orders[id]
-
-		connection.setblocking(False)
-		callback("orders", "finished", message=_("Received all the orders..."))
 
 	def __getSubObjects(self, connection, toget, plural_name, subname, number, callback=None):
 		c = callback
@@ -830,8 +763,8 @@ def apply(connection, evt, cache):
 			if failed(result):
 				raise IOError("Unable to add the design...")
 			
-			# Need to update the event with the new ID of the design.
 			evt.id = result.id
+			evt.change = result
 
 	elif evt.what == "categories":
 
@@ -847,8 +780,8 @@ def apply(connection, evt, cache):
 			if failed(result):
 				raise IOError("Unable to add the category...")
 			
-			# Need to update the event with the new ID of the design.
 			evt.id = result.id
+			evt.change = result
 	else:
 		raise ValueError("Can't deal with that yet!")
 

@@ -241,7 +241,7 @@ class ChangeList(object):
 
 	def find(self, what):
 		node = self.head
-		while node.right != None:
+		while node != None:
 			if node._what is what:
 				return node
 			node = node.right
@@ -275,6 +275,9 @@ class ChangeList(object):
 		ins.right = after
 
 	def insert_before(self, node, ins):
+		if node == self.head:
+			raise "Can't insert before head"
+
 		before = node.left
 		after  = node
 

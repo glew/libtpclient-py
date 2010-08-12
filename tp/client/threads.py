@@ -6,6 +6,8 @@ import time
 import traceback
 from threading import Lock
 
+import objectutils
+
 from media import Media
 
 from config import load_data, save_data
@@ -13,9 +15,6 @@ from version import version
 		
 from tp.netlib.objects import parameters
 from tp.netlib import objects
-from requirements import graphicsdir
-
-from extra import objectutils
 
 def nop(*args, **kw):
 	return
@@ -29,7 +28,10 @@ class Event(Exception):
 	type = property(type)
 
 	def __init__(self, *args, **kw):
-		self.message = ""
+		if len(args) > 0:
+			self.message = args[0]
+		else:
+			self.message = ""
 		Exception.__init__(self, *args, **kw)
 
 		if self.__class__.__name__[-5:] != "Event":
@@ -135,9 +137,6 @@ class Application(object):
 		self.finder.Post(event)
 		self.media.Post(event)
 
-		#print "Post", event, event.source
-		#import traceback
-		#traceback.print_stack()
 		self.gui.Call(self.gui.Post, event)
 
 	def Exit(self, *args, **kw):
@@ -173,6 +172,7 @@ class CallThread(threading.Thread):
 
 	def __init__(self):
 		threading.Thread.__init__(self, name=self.name)
+		self.setDaemon(True)
 		self.exit = False
 		self.reset = False
 		self.tocall = []
@@ -357,7 +357,6 @@ class NetworkThread(CallThread):
 		except (AttributeError, KeyError), e:
 			print e
 
-
 	def error(self, error):
 		traceback.print_exc()
 		if isinstance(error, (IOError, socket.error)):
@@ -417,16 +416,16 @@ class NetworkThread(CallThread):
 		callback("connecting", "downloaded", _("Got the supported features..."), amount=1)
 
 		callback("connecting", "progress", _("Looking for running games..."))
-		games = self.connection.games()
-		if failed(games):
-			games = []
+		self.games = self.connection.games()
+		if failed(self.games):
+			self.games = []
 		else:
-			for game in games:
+			for game in self.games:
 				callback("connecting", "progress", _("Found %(game)s playing %(ruleset)s (%(version)s)") % {'game': game.name, 'ruleset': game.rule, 'version': game.rulever})
 
 		callback("connecting", "downloaded", _("Got the supported features..."), amount=1)
 
-		self.application.Post(self.NetworkConnectEvent("Connected to %s" % host, features, games))
+		self.application.Post(self.NetworkConnectEvent("Connected to %s" % host, features, self.games))
 		return 
 
 	def ConnectTo(self, host, username, password, debug=False, callback=nop, cs="unknown"):
@@ -448,16 +447,27 @@ class NetworkThread(CallThread):
 			callback("connecting", "downloaded", _("Logged in okay!"), amount=1)
 
 			# Create a new cache
-			self.application.cache = self.application.CacheClass(self.application.CacheClass.key(host, username))
+			# FIXME: This should choose the actual game we are connecting too.
+			self.application.cache = self.application.CacheClass(self.application.CacheClass.key(host, self.games[0], username))
 			return True
 		finally:
 			callback("connecting", "finished", "")
+
+	def GetTimeRemaining(self):
+		frame = self.connection.time()
+		print "Frame", repr(frame), frame.waiting
+		if failed(frame):
+			print "GetTimeRemaining failed!"
+			return
+		self.application.Post(self.NetworkTimeRemainingEvent(frame))
 
 	def CacheUpdate(self, callback):
 		try:
 			callback("connecting", "alreadydone", "Already connected to the server!")
 			self.application.cache.update(self.connection, callback)
 			self.application.cache.save()
+
+			self.GetTimeRemaining()
 		except ThreadStop, e:
 			pass
 		except Exception, e:
@@ -470,13 +480,11 @@ class NetworkThread(CallThread):
 				pass
 
 		try:
-			if not hasattr(self.connection, "turnfinished"):
-				print "Was unable to request turnfinished."
-				return
-
 			if failed(self.connection.turnfinished()):
 				print "The request for end of turn failed."
 				return
+
+			self.GetTimeRemaining()
 		except Exception, e:
 			print e
 
@@ -565,6 +573,7 @@ class DownloaderThread(threading.Thread):
 	
 	def __init__(self, file, callback, finishedcallback, parent, cache, application):
 		threading.Thread.__init__(self)
+		self.setDaemon(True)
 		self.file = file
 		self.finishedcallback = finishedcallback
 		self.callback = callback
@@ -936,6 +945,7 @@ class LocalBrowser(LocalBrowserB, threading.Thread):
 
 	def __init__(self, *args, **kw):
 		threading.Thread.__init__(self, name=self.name)
+		self.setDaemon(True)
 		LocalBrowserB.__init__(self, *args, **kw)
 
 class RemoteBrowser(RemoteBrowserB, threading.Thread):
@@ -943,6 +953,7 @@ class RemoteBrowser(RemoteBrowserB, threading.Thread):
 
 	def __init__(self, *args, **kw):
 		threading.Thread.__init__(self, name=self.name)
+		self.setDaemon(True)
 		RemoteBrowserB.__init__(self, *args, **kw)
 	
 class FinderThread(CallThread):
