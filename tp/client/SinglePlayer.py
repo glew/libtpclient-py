@@ -612,7 +612,8 @@ class SinglePlayerGame:
                                 # start server - add sqlite database if tpsqlite persistence
                                 if value == 'tpsqlite':
                                         if sys.platform == 'win32':
-                                                servercmd += ' --sqlite_db '
+                                                win32location = os.path.join(servercwd, 'tpserver.db')
+                                                servercmd += ' --sqlite_db ' + win32databaselocation
                                         else:
                                                 servercmd += ' --sqlite_db /var/tmp/tpserver.db'
                                                 if self.newgame and os.path.exists("/var/tmp/tpserver.db"):
@@ -846,14 +847,8 @@ class SinglePlayerGame:
 
                 # Check to make sure the file exists
                 if os.path.exists(src):
-                        # Copy savefile to persistence database location
-                        if sys.platform == 'win32':
-                                shutil.copyfile(src, win32Location)
-                                conn = sqlite3.connect(win32Location)
-                        else:
-                                shutil.copyfile(src, "/var/tmp/tpserver.db")
-                                conn = sqlite3.connect("/var/tmp/tpserver.db")
-
+                        # Connect to savefile
+                        conn = sqlite3.connect(src)
                         cur = conn.cursor()
 
                         cur.execute("SELECT * FROM singleplayer;")
@@ -918,7 +913,13 @@ class SinglePlayerGame:
                                         self.sparams = {}
                                         self.opponents = []
                                         return rtv
+                                # Successful load of savefile
                                 else:
+                                        # Copy savefile to persistence database location
+                                        if sys.platform == 'win32':
+                                                shutil.copyfile(src, os.path.join(self.locallist['server'][self.sname]['cwd'],'tpserver.db'))
+                                        else:
+                                                shutil.copyfile(src, "/var/tmp/tpserver.db")
                                         self.newgame = false
                                         return ''
                         # Else savefile is invalid, no results from singleplayer query
