@@ -856,6 +856,8 @@ class SinglePlayerGame:
 		@rtype: string
                 """
                 rtv = ''
+                sname = ''
+                rname = ''
 
                 # Check to make sure the file exists
                 if os.path.exists(src):
@@ -868,26 +870,35 @@ class SinglePlayerGame:
                         rowlist = cur.fetchall()
                         # Check there are results
                         if len(rowlist):
-                                for row in cur:
+                                for row in rowlist:
                                         if (row[0 ] == 'server'):
                                                 for server in self.locallist['server']:
                                                         if row[2] == server:
                                                                 if row[3] == self.locallist['server'][server]['version']:
-                                                                        self.sname = row[2]
+                                                                        sname = row[2]
                                                                         break
                                                                 continue
-                                                if not self.sname:
+                                                if not sname:
                                                         if rtv:
                                                                 rtv += "\n"
                                                         rtv += "No compatible server"
                                         elif (row[0] == 'ruleset'):
-                                                for ruleset in self.locallist['server'][self.sname]['ruleset']:
-                                                        if row[2] == ruleset:
-                                                                if row[3] == self.locallist['server'][self.sname]['ruleset'][ruleset]['version']:
-                                                                        self.rname = row[2]
-                                                                        break
-                                                                continue
-                                                if not self.rname:
+                                                if not sname:
+                                                        for server in self.locallist['server']:
+                                                                for ruleset in self.locallist['server'][server]['ruleset']:
+                                                                        if row[2] == ruleset:
+                                                                                if row[3] == self.locallist['server'][server]['ruleset'][ruleset]['version']:
+                                                                                        rname = row[2]
+                                                                                        break
+                                                                                continue
+                                                else:
+                                                        for ruleset in self.locallist['server'][server]['ruleset']:
+                                                                if row[2] == ruleset:
+                                                                        if row[3] == self.locallist['server'][sname]['ruleset'][ruleset]['version']:
+                                                                                rname = row[2]
+                                                                                break
+                                                                        continue
+                                                if not rname:
                                                         if rtv:
                                                                 rtv += "\n"
                                                         rtv += "No compatible ruleset"
@@ -927,6 +938,9 @@ class SinglePlayerGame:
                                         return rtv
                                 # Successful load of savefile
                                 else:
+                                        self.sname = sname
+                                        self.rname = rname
+
                                         # Copy savefile to persistence database location
                                         if sys.platform == 'win32':
                                                 shutil.copyfile(src, os.path.join(self.locallist['server'][self.sname]['cwd'],'tpserver.db'))
@@ -963,13 +977,15 @@ if __name__ == "__main__":
                 print 'LOADING GAME'
                 savefile = raw_input('Type the absolute location of the savefile: ')
 
-                print game.load(savefile)
-
-                port = game.start()
-                if port:
-                        print "Game started on port %d." % port
-                        raw_input("Press any key to stop...")
-                game.stop()
+                status = game.load(savefile)
+                if status:
+                        print status
+                else:
+                        port = game.start()
+                        if port:
+                                print "Game started on port %d." % port
+                                raw_input("Press any key to stop...")
+                        game.stop()
         else:
                 print 'SELECT RULESET'
                 while game.rname not in game.rulesets:
