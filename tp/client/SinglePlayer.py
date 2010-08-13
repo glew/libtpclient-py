@@ -613,7 +613,10 @@ class SinglePlayerGame:
                                 if value == 'tpsqlite':
                                         if sys.platform == 'win32':
                                                 win32location = os.path.join(servercwd, 'tpserver.db')
-                                                servercmd += ' --sqlite_db ' + win32databaselocation
+                                                servercmd += ' --sqlite_db ' + win32location
+                                                if self.newgame and os.path.exists(win32location):
+                                                        print "Removing old persistence database"
+                                                        os.remove(win32location)
                                         else:
                                                 servercmd += ' --sqlite_db /var/tmp/tpserver.db'
                                                 if self.newgame and os.path.exists("/var/tmp/tpserver.db"):
@@ -719,6 +722,15 @@ class SinglePlayerGame:
 
 		# reset active flag
 		self.active = False
+
+                if self.locallist['server'][self.sname]['parameter']['persistence'] == 'tpsqlite':
+                        if sys.platform == 'win32':
+                                win32location = os.path.join(self.locallist['server'][self.sname]['cwd'], 'tpserver.db')
+                                if os.path.exists(win32location):
+                                        os.remove(win32location)
+                        else:
+                                if self.newgame and os.path.exists("/var/tmp/tpserver.db"):
+                                        os.remove("/var/tmp/tpserver.db")
 
 		try:
 			# stop server
