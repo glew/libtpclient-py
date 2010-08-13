@@ -839,63 +839,107 @@ class SinglePlayerGame:
 
                 @param src: The source save file, complete with directory and filename
                 @type src: string
+		@return: Empty string if successful, incompatible components string otherwise.
+		@rtype: string
                 """
-                self.newgame = False
+                rtv = ''
 
-                # Copy savefile to persistence database location
-                if sys.platform == 'win32':
-                        shutil.copyfile(src, win32Location)
-                        conn = sqlite3.connect(win32Location)
-                else:
-                        shutil.copyfile(src, "/var/tmp/tpserver.db")
-                        conn = sqlite3.connect("/var/tmp/tpserver.db")
-
-                cur = conn.cursor()
-
-                cur.execute("SELECT * FROM singleplayer;")
-
-                for row in cur:
-                        if (row[0 ] == 'server'):
-                                for server in self.locallist['server']:
-                                        if row[2] == server:
-                                                if row[3] == self.locallist['server'][server]['version']:
-                                                        self.sname = row[2]
-                                                        break
-                                                continue
-                                if not self.sname:
-                                        print "No compatible server"
-                        elif (row[0] == 'ruleset'):
-                                for ruleset in self.locallist['server'][self.sname]['ruleset']:
-                                        if row[2] == ruleset:
-                                                if row[3] == self.locallist['server'][self.sname]['ruleset'][ruleset]['version']:
-                                                        self.rname = row[2]
-                                                        break
-                                                continue
-                                if not self.rname:
-                                        print "No compatible ruleset"
-                        elif (row[0] == 'rparam'):
-                                self.rparams[row[1]] = row[2]
-                        elif (row[0] == 'sparam'):
-                                self.sparams[row[1]] = row[2]
-
-                cur.execute("SELECT * FROM opponent;")
-
-                for row in cur:
-                        ainame = ''
-                        aiuser = ''
-                        aiparams = {}
-                        for aiclient in self.locallist['aiclient']:
-                                if row[0] == aiclient:
-                                        if row[3] == self.locallist['aiclient'][aiclient]['version']:
-                                                ainame = row[0]
-                                                aiuser = row[1]
-                                                aiparams = cPickle.loads(str(row[2]))
-                                                break
-                                        continue
-                        if ainame:
-                                self.add_opponent(ainame, aiuser, aiparams)
+                # Check to make sure the file exists
+                if os.path.exists(src):
+                        # Copy savefile to persistence database location
+                        if sys.platform == 'win32':
+                                shutil.copyfile(src, win32Location)
+                                conn = sqlite3.connect(win32Location)
                         else:
-                                print "Opponent %s is not compatible" % row[0]
+                                shutil.copyfile(src, "/var/tmp/tpserver.db")
+                                conn = sqlite3.connect("/var/tmp/tpserver.db")
+
+                        cur = conn.cursor()
+
+                        cur.execute("SELECT * FROM singleplayer;")
+
+                        rowlist = cur.fetchall()
+                        # Check there are results
+                        if len(rowlist):
+                                for row in cur:
+                                        if (row[0 ] == 'server'):
+                                                for server in self.locallist['server']:
+                                                        if row[2] == server:
+                                                                if row[3] == self.locallist['server'][server]['version']:
+                                                                        self.sname = row[2]
+                                                                        break
+                                                                continue
+                                                if not self.sname:
+                                                        if rtv:
+                                                                rtv += "\n"
+                                                        rtv += "No compatible server"
+                                        elif (row[0] == 'ruleset'):
+                                                for ruleset in self.locallist['server'][self.sname]['ruleset']:
+                                                        if row[2] == ruleset:
+                                                                if row[3] == self.locallist['server'][self.sname]['ruleset'][ruleset]['version']:
+                                                                        self.rname = row[2]
+                                                                        break
+                                                                continue
+                                                if not self.rname:
+                                                        if rtv:
+                                                                rtv += "\n"
+                                                        rtv += "No compatible ruleset"
+                                        elif (row[0] == 'rparam'):
+                                                self.rparams[row[1]] = row[2]
+                                        elif (row[0] == 'sparam'):
+                                                self.sparams[row[1]] = row[2]
+
+                                cur.execute("SELECT * FROM opponent;")
+
+                                for row in cur:
+                                        ainame = ''
+                                        aiuser = ''
+                                        aiparams = {}
+                                        for aiclient in self.locallist['aiclient']:
+                                                if row[0] == aiclient:
+                                                        if row[3] == self.locallist['aiclient'][aiclient]['version']:
+                                                                ainame = row[0]
+                                                                aiuser = row[1]
+                                                                aiparams = cPickle.loads(str(row[2]))
+                                                                break
+                                                        continue
+                                        if ainame:
+                                                self.add_opponent(ainame, aiuser, aiparams)
+                                        else:
+                                                if rtv:
+                                                        rtv += "\n"
+                                                rtv += "Opponent %s is not compatible" % row[0]
+
+                                if rtv:
+                                        self.newgame = true
+                                        self.sname = ''
+                                        self.rname = ''
+                                        self.rparams = {}
+                                        self.sparams = {}
+                                        self.opponents = []
+                                        return rtv
+                                else:
+                                        self.newgame = false
+                                        return ''
+                        # Else savefile is invalid, no results from singleplayer query
+                        else:
+                                rtv = 'Savefile is invalid.'
+                                self.newgame = true
+                                self.sname = ''
+                                self.rname = ''
+                                self.rparams = {}
+                                self.sparams = {}
+                                self.opponents = []
+                                return rtv
+                else:
+                        rtv = 'Savefile does not exist.'
+                        self.newgame = true
+                        self.sname = ''
+                        self.rname = ''
+                        self.rparams = {}
+                        self.sparams = {}
+                        self.opponents = []
+                        return rtv
 
 
 if __name__ == "__main__":
