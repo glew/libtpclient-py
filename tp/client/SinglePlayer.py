@@ -918,7 +918,7 @@ class SinglePlayerGame:
                                                 rtv += "Opponent %s is not compatible" % row[0]
 
                                 if rtv:
-                                        self.newgame = true
+                                        self.newgame = True
                                         self.sname = ''
                                         self.rname = ''
                                         self.rparams = {}
@@ -932,12 +932,12 @@ class SinglePlayerGame:
                                                 shutil.copyfile(src, os.path.join(self.locallist['server'][self.sname]['cwd'],'tpserver.db'))
                                         else:
                                                 shutil.copyfile(src, "/var/tmp/tpserver.db")
-                                        self.newgame = false
+                                        self.newgame = False
                                         return ''
                         # Else savefile is invalid, no results from singleplayer query
                         else:
                                 rtv = 'Savefile is invalid.'
-                                self.newgame = true
+                                self.newgame = True
                                 self.sname = ''
                                 self.rname = ''
                                 self.rparams = {}
@@ -946,7 +946,7 @@ class SinglePlayerGame:
                                 return rtv
                 else:
                         rtv = 'Savefile does not exist.'
-                        self.newgame = true
+                        self.newgame = True
                         self.sname = ''
                         self.rname = ''
                         self.rparams = {}
@@ -963,7 +963,7 @@ if __name__ == "__main__":
                 print 'LOADING GAME'
                 savefile = raw_input('Type the absolute location of the savefile: ')
 
-                game.load(savefile)
+                print game.load(savefile)
 
                 port = game.start()
                 if port:
